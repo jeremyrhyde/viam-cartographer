@@ -31,7 +31,6 @@ type Config struct {
 	Logger                   golog.Logger
 	nextData                 nextData
 	started                  bool
-	stopped                  bool
 	RunFinalOptimizationFunc func(context.Context, time.Duration) error
 }
 
@@ -55,13 +54,16 @@ func (config *Config) StartLidar(
 			return false
 		default:
 			if jobDone := config.addLidarReading(ctx); jobDone {
-				config.stopped = true
 				config.Logger.Info("Beginning final optimization")
 				err := config.RunFinalOptimizationFunc(ctx, config.Timeout)
 				if err != nil {
 					config.Logger.Error("Failed to finish processing all sensor readings")
 				}
 				return true
+			}
+
+			if config.IMUName != "" {
+				_ = config.addIMUReading(ctx)
 			}
 		}
 	}
@@ -144,26 +146,6 @@ func tryAddLidarReading(ctx context.Context, reading []byte, readingTime time.Ti
 	}
 	timeElapsedMs := int(time.Since(startTime).Milliseconds())
 	return int(math.Max(0, float64(config.LidarDataRateMsec-timeElapsedMs)))
-}
-
-// StartIMU polls the IMU to get the next sensor reading and adds it to the cartofacade.
-// stops when the context is Done.
-func (config *Config) StartIMU(
-	ctx context.Context,
-) bool {
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-			if config.stopped {
-				return true
-			}
-			if jobDone := config.addIMUReading(ctx); jobDone {
-				return true
-			}
-		}
-	}
 }
 
 // addIMUReading adds an IMU reading to the cartofacade.

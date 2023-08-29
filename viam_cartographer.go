@@ -142,17 +142,6 @@ func initSensorProcesses(cancelCtx context.Context, cartoSvc *CartographerServic
 			cartoSvc.cancelSensorProcessFunc()
 		}
 	}()
-
-	if spConfig.IMUName != "" {
-		cartoSvc.sensorProcessWorkers.Add(1)
-		go func() {
-			defer cartoSvc.sensorProcessWorkers.Done()
-			if jobDone := spConfig.StartIMU(cancelCtx); jobDone {
-				cartoSvc.jobDone.Store(true)
-				cartoSvc.cancelSensorProcessFunc()
-			}
-		}()
-	}
 }
 
 // New returns a new slam service for the given robot.

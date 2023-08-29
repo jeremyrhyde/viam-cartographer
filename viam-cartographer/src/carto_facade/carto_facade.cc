@@ -862,11 +862,14 @@ void CartoFacade::AddIMUReading(const viam_carto_imu_reading *sr) {
 
     if (map_builder_mutex.try_lock()) {
         VLOG(1) << "AddSensorData timestamp: " << measurement.time
-                << " Sensor type: IMU ";
+                << " Sensor type: IMU "
+                << "Data added is: (" << measurement.linear_acceleration[0]
+                << ", " << measurement.linear_acceleration[1] << ", "
+                << measurement.linear_acceleration[2] << ") and ("
+                << measurement.angular_velocity[0] << ", "
+                << measurement.angular_velocity[1] << ", "
+                << measurement.angular_velocity[2] << ")";
         map_builder.AddSensorData(kIMUSensorId.id, measurement);
-        VLOG(1) << "Data added is: " << measurement.linear_acceleration
-                << " and " << measurement.angular_velocity;
-        LOG(INFO) << "Added IMU data to Cartographer";
         tmp_global_pose = map_builder.GetGlobalPose();
         map_builder_mutex.unlock();
         {
