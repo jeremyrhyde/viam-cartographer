@@ -4,6 +4,7 @@ package sensorprocess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -16,7 +17,10 @@ import (
 	"github.com/viamrobotics/viam-cartographer/sensors"
 )
 
-var undefinedIMU = cartofacade.IMUReading{}
+var (
+	undefinedIMU       = cartofacade.IMUReading{}
+	minimumReplayDelay = 1
+)
 
 // Config holds config needed throughout the process of adding a sensor reading to the cartofacade.
 type Config struct {
@@ -48,11 +52,23 @@ type nextData struct {
 func (config *Config) StartLidar(
 	ctx context.Context,
 ) bool {
+	lidarDataRateMsec := int(math.Max(float64(minimumReplayDelay), float64(config.LidarDataRateMsec)))
+	imuDataRateMsec := int(math.Max(float64(minimumReplayDelay), float64(config.IMUDataRateMsec)))
+
+	tickerLidar := time.NewTicker(time.Millisecond * time.Duration(lidarDataRateMsec))
+	defer tickerLidar.Stop()
+	tickerMovementSensor := time.NewTicker(time.Millisecond * time.Duration(imuDataRateMsec))
+	defer tickerMovementSensor.Stop()
+	var tt time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return false
-		default:
+
+		case <-tickerLidar.C:
+			ttt := time.Now()
+			fmt.Printf("TIMMMMMME: %v\n", ttt.Sub(tt).Milliseconds())
+			tt = ttt
 			if jobDone := config.addLidarReading(ctx); jobDone {
 				config.Logger.Info("Beginning final optimization")
 				err := config.RunFinalOptimizationFunc(ctx, config.Timeout)
@@ -61,10 +77,12 @@ func (config *Config) StartLidar(
 				}
 				return true
 			}
-
+		case <-tickerMovementSensor.C:
 			if config.IMUName != "" {
 				_ = config.addIMUReading(ctx)
 			}
+
+		default:
 		}
 	}
 }
@@ -85,8 +103,7 @@ func (config *Config) addLidarReading(ctx context.Context) bool {
 
 		// sleep remainder of time interval
 		timeToSleep := tryAddLidarReading(ctx, tsr.Reading, tsr.ReadingTime, *config)
-		time.Sleep(time.Duration(timeToSleep) * time.Millisecond)
-		config.Logger.Debugf("sleep for %s milliseconds", time.Duration(timeToSleep))
+		config.Logger.Debugf("lidar waiting for %s milliseconds", time.Duration(timeToSleep))
 	} else {
 		// add the stored lidar data and begin processing the next one, if no imu exists or the currently stored imu data occurs after it.
 		if config.IMUName == "" || config.nextData.lidarTime.Sub(config.nextData.imuTime).Milliseconds() <= 0 {
@@ -102,8 +119,6 @@ func (config *Config) addLidarReading(ctx context.Context) bool {
 
 			config.nextData.lidarTime = tsr.ReadingTime
 			config.nextData.lidarData = tsr.Reading
-		} else {
-			time.Sleep(time.Millisecond)
 		}
 	}
 	return false
@@ -172,7 +187,7 @@ func (config *Config) addIMUReading(
 
 		// sleep remainder of time interval
 		timeToSleep := tryAddIMUReading(ctx, sr, tsr.ReadingTime, *config)
-		time.Sleep(time.Duration(timeToSleep) * time.Millisecond)
+		config.Logger.Debugf("imu waiting for %s milliseconds", time.Duration(timeToSleep))
 	} else {
 		// add the stored imu data and begin processing the next one, if the currently stored lidar data occurs after it.
 		if config.nextData.imuTime.Sub(config.nextData.lidarTime).Milliseconds() < 0 {
@@ -200,8 +215,6 @@ func (config *Config) addIMUReading(
 			} else {
 				config.Logger.Debugf("%v \t | IMU | Dropping data \t \t | %v \n", tsr.ReadingTime, tsr.ReadingTime.Unix())
 			}
-		} else {
-			time.Sleep(time.Millisecond)
 		}
 	}
 	return false
