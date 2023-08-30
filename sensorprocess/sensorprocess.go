@@ -4,7 +4,9 @@ package sensorprocess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 )
 
 var undefinedIMU = cartofacade.IMUReading{}
+var defaultTime = time.Time{}
 
 // Config holds config needed throughout the process of adding a sensor reading to the cartofacade.
 type Config struct {
@@ -31,9 +34,11 @@ type Config struct {
 	Logger                   golog.Logger
 	nextLidarData            nextLidarData
 	nextIMUData              nextIMUData
-	firstLidarReadingTime    *time.Time
-	lastLidarReadingTime     *time.Time
+	firstLidarReadingTime    time.Time
+	lastLidarReadingTime     time.Time
 	RunFinalOptimizationFunc func(context.Context, time.Duration) error
+	file                     *os.File
+	i                        int
 }
 
 // nextData stores the next data to be added to cartographer along with its associated timestamp so that,
@@ -53,13 +58,21 @@ type nextIMUData struct {
 func (config *Config) StartLidar(
 	ctx context.Context,
 ) bool {
+
+	file, err := os.Create("/Users/jeremyhyde/Downloads/mock_data/imu/data.txt") //create a new file
+	if err != nil {
+		fmt.Println(err)
+	}
+	defer file.Close()
+	config.file = file
+
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		default:
 			if jobDone := config.addLidarReading(ctx); jobDone {
-				config.lastLidarReadingTime = &config.nextLidarData.time
+				config.lastLidarReadingTime = config.nextLidarData.time
 				config.Logger.Info("Beginning final optimization")
 				err := config.RunFinalOptimizationFunc(ctx, config.Timeout)
 				if err != nil {
@@ -85,6 +98,16 @@ func (config *Config) addLidarReading(ctx context.Context) bool {
 			return status
 		}
 
+		file, err := os.Create(fmt.Sprintf("/Users/jeremyhyde/Downloads/mock_data/lidar/%v.pcd", config.i)) //create a new file
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		file.Write(tsr.Reading)
+		file.Close()
+
+		config.i++
+
 		// sleep remainder of time interval
 		timeToSleep := tryAddLidarReading(ctx, tsr.Reading, tsr.ReadingTime, *config)
 		time.Sleep(time.Duration(timeToSleep) * time.Millisecond)
@@ -97,9 +120,20 @@ func (config *Config) addLidarReading(ctx context.Context) bool {
 		*/
 		if config.IMUName == "" || config.nextLidarData.time.Sub(config.nextIMUData.time).Milliseconds() <= 0 {
 			if config.nextLidarData.data != nil {
+
+				file, err := os.Create(fmt.Sprintf("/Users/jeremyhyde/Downloads/mock_data/lidar/%v.pcd", config.i)) //create a new file
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				file.Write(config.nextLidarData.data)
+				file.Close()
+
+				config.i++
+
 				tryAddLidarReadingUntilSuccess(ctx, config.nextLidarData.data, config.nextLidarData.time, *config)
-				if config.firstLidarReadingTime == nil {
-					config.firstLidarReadingTime = &config.nextLidarData.time
+				if config.firstLidarReadingTime == defaultTime {
+					config.firstLidarReadingTime = config.nextLidarData.time
 				}
 			}
 			// get next lidar data response
@@ -166,7 +200,7 @@ func (config *Config) StartIMU(
 		case <-ctx.Done():
 			return false
 		default:
-			if config.lastLidarReadingTime != nil && config.nextIMUData.time.Sub(*config.lastLidarReadingTime) > 0 {
+			if config.lastLidarReadingTime != defaultTime && config.nextIMUData.time.Sub(config.lastLidarReadingTime) > 0 {
 				return true
 			}
 			if jobDone := config.addIMUReading(ctx); jobDone {
@@ -197,6 +231,9 @@ func (config *Config) addIMUReading(
 			LinearAcceleration: tsr.LinearAcceleration,
 			AngularVelocity:    tsr.AngularVelocity,
 		}
+		config.file.Write([]byte(fmt.Sprintf("(%v, %v, %v) (%v, %v, %v)\n",
+			sr.LinearAcceleration.X, sr.LinearAcceleration.Y, sr.LinearAcceleration.Z,
+			sr.AngularVelocity.X, sr.AngularVelocity.Y, sr.AngularVelocity.Z)))
 
 		// sleep remainder of time interval
 		timeToSleep := tryAddIMUReading(ctx, sr, tsr.ReadingTime, *config)
@@ -208,8 +245,13 @@ func (config *Config) addIMUReading(
 			the current IMU reading's timestamp.
 		*/
 		if config.nextIMUData.time.Sub(config.nextLidarData.time).Milliseconds() < 0 {
-			if config.nextIMUData.data != undefinedIMU && config.firstLidarReadingTime != nil &&
-				config.nextIMUData.time.Sub(*config.firstLidarReadingTime) > 0 {
+			if config.nextIMUData.data != undefinedIMU && config.firstLidarReadingTime != defaultTime &&
+				config.nextIMUData.time.Sub(config.firstLidarReadingTime) > 0 {
+
+				config.file.Write([]byte(fmt.Sprintf("(%v, %v, %v) (%v, %v, %v)\n",
+					config.nextIMUData.data.LinearAcceleration.X, config.nextIMUData.data.LinearAcceleration.Y, config.nextIMUData.data.LinearAcceleration.Z,
+					config.nextIMUData.data.AngularVelocity.X, config.nextIMUData.data.AngularVelocity.Y, config.nextIMUData.data.AngularVelocity.Z)))
+
 				tryAddIMUReadingUntilSuccess(ctx, config.nextIMUData.data, config.nextIMUData.time, *config)
 			}
 			// get next imu data response

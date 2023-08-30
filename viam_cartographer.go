@@ -5,6 +5,7 @@ package viamcartographer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,8 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println(optionalConfigParams.ImuDataRateMsec)
 
 	if optionalConfigParams.LidarDataRateMsec == 0 && optionalConfigParams.ImuDataRateMsec != 0 {
 		return nil, errors.New("In offline mode, but IMU data frequency is nonzero")
